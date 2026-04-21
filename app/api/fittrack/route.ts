@@ -1,146 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://127.0.0.1:8000";
+
 type Goal = "muscle_gain" | "fat_loss" | "endurance";
 type Level = "beginner" | "intermediate" | "advanced";
-type Confidence = "Low" | "Medium" | "High";
-
-type FitTrackRequest = {
-  goal: Goal;
-  level: Level;
-  age: number;
-};
-
-type FitTrackResponse = {
-  workout: string[];
-  fatigue: number;
-  explanation: string;
-  nutrition: string;
-  confidence: Confidence;
-  title: string;
-  inputs: FitTrackRequest;
-  generatedAt: string;
-};
-
-const GOAL_LABELS: Record<Goal, string> = {
-  muscle_gain: "Muscle Gain",
-  fat_loss: "Fat Loss",
-  endurance: "Endurance",
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function getWorkoutPlan(goal: Goal, level: Level): string[] {
-  const templates: Record<Goal, Record<Level, string[]>> = {
-    muscle_gain: {
-      beginner: ["Goblet Squat", "Incline Dumbbell Press", "Seated Row", "Romanian Deadlift", "Plank"],
-      intermediate: ["Barbell Squat", "Bench Press", "Lat Pulldown", "Bulgarian Split Squat", "Hanging Knee Raise"],
-      advanced: ["Back Squat", "Weighted Bench Press", "Barbell Row", "Deadlift", "Farmer Carry"],
-    },
-    fat_loss: {
-      beginner: ["Incline Walk", "Bodyweight Squat", "Push-Up", "Kettlebell Deadlift", "Bike Intervals"],
-      intermediate: ["Rowing Intervals", "Dumbbell Thruster", "Walking Lunges", "Battle Ropes", "Core Circuit"],
-      advanced: ["Sprint Intervals", "Complexes", "Sled Push", "Burpee Ladder", "High-Intensity Finisher"],
-    },
-    endurance: {
-      beginner: ["Zone 2 Cardio", "Step-Ups", "Light Row", "Core Stability", "Mobility Flow"],
-      intermediate: ["Tempo Run", "Bike Tempo Block", "Single-Leg Work", "Core Rotation", "Breathing Reset"],
-      advanced: ["Threshold Intervals", "Plyometric Circuit", "Hill Sprints", "Assault Bike", "Recovery Walk"],
-    },
-  };
-
-  return templates[goal][level];
-}
-
-function getFatigue(goal: Goal, level: Level, age: number): number {
-  const base = goal === "muscle_gain" ? 58 : goal === "fat_loss" ? 66 : 54;
-  const levelAdj = level === "beginner" ? 10 : level === "intermediate" ? 0 : -8;
-  const ageAdj = age >= 45 ? 8 : age >= 35 ? 4 : 0;
-  const goalAdj = goal === "endurance" ? -3 : goal === "fat_loss" ? 4 : 2;
-
-  return clamp(base + levelAdj + ageAdj + goalAdj, 15, 95);
-}
-
-function getConfidence(goal: Goal, level: Level): Confidence {
-  if (level === "advanced" && goal !== "fat_loss") return "High";
-  if (level === "beginner") return "Medium";
-  if (goal === "endurance") return "Medium";
-  return "High";
-}
-
-function getExplanation(goal: Goal, level: Level, age: number, fatigue: number): string {
-  const goalText =
-    goal === "muscle_gain"
-      ? "progressive overload and compound lifting"
-      : goal === "fat_loss"
-      ? "higher calorie expenditure and shorter rest periods"
-      : "aerobic capacity and steady pacing";
-
-  const levelText =
-    level === "beginner"
-      ? "simple movements and moderate volume"
-      : level === "intermediate"
-      ? "balanced exercise selection with enough challenge"
-      : "higher-intensity work with tighter progression";
-
-  const ageText =
-    age >= 40
-      ? "The plan slightly lowers overall stress to support recovery."
-      : "The plan keeps enough intensity to drive adaptation.";
-
-  const fatigueText =
-    fatigue >= 70
-      ? "Fatigue is relatively high, so recovery and form quality should be prioritized."
-      : fatigue >= 50
-      ? "Fatigue is moderate, so the session can stay productive without being excessive."
-      : "Fatigue is low, so the user can handle a stronger stimulus today.";
-
-  return `This plan is built around ${goalText}, using ${levelText}. ${ageText} ${fatigueText}`;
-}
-
-function getNutrition(goal: Goal, fatigue: number): string {
-  const protein = fatigue >= 70 ? 40 : fatigue >= 50 ? 35 : 30;
-  const base =
-    goal === "muscle_gain"
-      ? "Grilled chicken, rice, vegetables, Greek yogurt, and a fruit source."
-      : goal === "fat_loss"
-      ? "Salmon, greens, roasted vegetables, and a smaller portion of whole grains."
-      : "Turkey wrap, banana, oats, and a hydration-focused recovery snack.";
-
-  const carbFocus =
-    goal === "endurance"
-      ? "a higher-carb recovery meal"
-      : goal === "fat_loss"
-      ? "a balanced meal with controlled carbs"
-      : "a protein-forward meal with moderate carbs";
-
-  return `${base} Aim for about ${protein}g of protein and ${carbFocus} after the session.`;
-}
-
-function generatePlan(goal: Goal, level: Level, age: number): FitTrackResponse {
-  const workout = getWorkoutPlan(goal, level);
-  const fatigue = getFatigue(goal, level, age);
-  const confidence = getConfidence(goal, level);
-
-  const title =
-    goal === "muscle_gain"
-      ? "Hypertrophy Builder"
-      : goal === "fat_loss"
-      ? "Metabolic Burn"
-      : "Endurance Engine";
-
-  return {
-    workout,
-    fatigue,
-    confidence,
-    title,
-    explanation: getExplanation(goal, level, age, fatigue),
-    nutrition: getNutrition(goal, fatigue),
-    inputs: { goal, level, age },
-    generatedAt: new Date().toISOString(),
-  };
-}
 
 function isGoal(value: unknown): value is Goal {
   return value === "muscle_gain" || value === "fat_loss" || value === "endurance";
@@ -150,30 +13,54 @@ function isLevel(value: unknown): value is Level {
   return value === "beginner" || value === "intermediate" || value === "advanced";
 }
 
-function parseBody(body: unknown): FitTrackRequest | null {
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function parseBody(body: unknown): Record<string, unknown> | null {
   if (!body || typeof body !== "object") return null;
 
   const candidate = body as Record<string, unknown>;
-  const goal = candidate.goal;
-  const level = candidate.level;
-  const age = candidate.age;
-
-  if (!isGoal(goal) || !isLevel(level) || typeof age !== "number" || !Number.isFinite(age)) {
+  if (!isGoal(candidate.goal) || !isLevel(candidate.level) || typeof candidate.age !== "number") {
     return null;
   }
 
   return {
-    goal,
-    level,
-    age: Math.round(clamp(age, 18, 65)),
+    goal: candidate.goal,
+    level: candidate.level,
+    age: clamp(candidate.age, 18, 65),
+    gender: candidate.gender === "Female" ? "Female" : "Male",
+    weight_kg: typeof candidate.weight_kg === "number" ? candidate.weight_kg : 78,
+    height_m: typeof candidate.height_m === "number" ? candidate.height_m : 1.78,
+    bmi: typeof candidate.bmi === "number" ? candidate.bmi : null,
+    fat_percentage: typeof candidate.fat_percentage === "number" ? candidate.fat_percentage : 18.5,
+    resting_bpm: typeof candidate.resting_bpm === "number" ? candidate.resting_bpm : 62,
+    avg_bpm: typeof candidate.avg_bpm === "number" ? candidate.avg_bpm : 145,
+    max_bpm: typeof candidate.max_bpm === "number" ? candidate.max_bpm : 182,
+    hrv_ms: typeof candidate.hrv_ms === "number" ? candidate.hrv_ms : 55,
+    hour_of_day: typeof candidate.hour_of_day === "number" ? candidate.hour_of_day : 7,
+    workout_type: typeof candidate.workout_type === "string" ? candidate.workout_type : "Strength",
+    session_duration_hours:
+      typeof candidate.session_duration_hours === "number" ? candidate.session_duration_hours : 1,
+    workout_frequency_days_week:
+      typeof candidate.workout_frequency_days_week === "number" ? candidate.workout_frequency_days_week : 4,
+    water_intake_liters: typeof candidate.water_intake_liters === "number" ? candidate.water_intake_liters : 2.5,
+    time_in_gym_min: typeof candidate.time_in_gym_min === "number" ? candidate.time_in_gym_min : 75,
+    idle_time_min: typeof candidate.idle_time_min === "number" ? candidate.idle_time_min : 10,
+    completion_pct: typeof candidate.completion_pct === "number" ? candidate.completion_pct : 90,
+    sleep_hours: typeof candidate.sleep_hours === "number" ? candidate.sleep_hours : 7,
+    fatigue_score: typeof candidate.fatigue_score === "number" ? candidate.fatigue_score : 30,
+    recovery_ready: typeof candidate.recovery_ready === "number" ? candidate.recovery_ready : 1,
+    workout_completed: typeof candidate.workout_completed === "number" ? candidate.workout_completed : 1,
+    protein_target_g: typeof candidate.protein_target_g === "number" ? candidate.protein_target_g : 30,
   };
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    message: "FitTrack API is running",
-    supportedGoals: Object.keys(GOAL_LABELS),
+    message: "FitTrack API proxy is running",
+    backend: PYTHON_API_URL,
   });
 }
 
@@ -183,29 +70,46 @@ export async function POST(req: NextRequest) {
     const parsed = parseBody(body);
 
     if (!parsed) {
+      return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
+    }
+
+    const response = await fetch(`${PYTHON_API_URL}/api/v1/predict`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(parsed),
+    });
+
+    const text = await response.text();
+
+    let data: any;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!response.ok) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Invalid request body. Expected: { goal, level, age }",
+          error: data?.detail || data?.error || `Prediction failed (${response.status})`,
         },
-        { status: 400 }
+        { status: response.status }
       );
     }
 
-    const result = generatePlan(parsed.goal, parsed.level, parsed.age);
-
-    return NextResponse.json(
-      {
-        ok: true,
-        data: result,
-      },
-      { status: 200 }
-    );
-  } catch {
+    return NextResponse.json({
+      ok: true,
+      data,
+    });
+  } catch (error: any) {
+    console.error("FitTrack proxy error:", error);
     return NextResponse.json(
       {
         ok: false,
-        error: "Unable to generate plan right now.",
+        error: error?.message || "Unable to reach model backend",
       },
       { status: 500 }
     );
