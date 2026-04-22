@@ -1,10 +1,4 @@
-"use client";
-
-import dynamic from "next/dynamic";
-
-const FitTrackAI = dynamic(() => import("@/components/FitTrackAI"), {
-  ssr: false,
-});
+import FitTrackAI from "@/components/FitTrackAI";
 
 export default function Page() {
   return <FitTrackAI />;
