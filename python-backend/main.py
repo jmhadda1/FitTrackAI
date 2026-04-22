@@ -4,7 +4,7 @@ import traceback
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="FitTrack Model API", version="4.1.0")
@@ -107,24 +107,59 @@ def map_workout_type(goal: str) -> str:
     return "General Fitness"
 
 
+# Mappings from frontend-facing values to the labels the model was trained on.
+# Training used: goal in {Flexibility, General Fitness, Muscle Gain, Weight Loss},
+# workout_type in {Cardio, CrossFit, HIIT, Strength, Yoga} (Cardio is the drop_first
+# reference), gender in {Male, Female} (Female is the drop_first reference), and
+# experience_level as an ordinal integer. Without these mappings the one-hot
+# columns silently end up all zero after reindex().
+GOAL_TO_TRAINING_LABEL = {
+    "muscle_gain": "Muscle Gain",
+    "fat_loss": "Weight Loss",
+    "endurance": "General Fitness",
+    "flexibility": "Flexibility",
+}
+
+WORKOUT_TYPE_TO_TRAINING_LABEL = {
+    "strength": "Strength",
+    "hiit": "HIIT",
+    "cardio": "Cardio",
+    "crossfit": "CrossFit",
+    "yoga": "Yoga",
+}
+
+EXPERIENCE_LEVEL_ORDINAL = {
+    "beginner": 1,
+    "intermediate": 2,
+    "advanced": 3,
+}
+
+
 def build_feature_frame(payload: PredictRequest) -> tuple[pd.DataFrame, float]:
     bmi = payload.bmi if payload.bmi is not None else payload.weight_kg / (payload.height_m ** 2)
 
+    goal_label = GOAL_TO_TRAINING_LABEL.get(payload.goal.lower(), "General Fitness")
+    workout_type_label = WORKOUT_TYPE_TO_TRAINING_LABEL.get(
+        payload.workout_type.lower(), payload.workout_type
+    )
+    experience_ordinal = EXPERIENCE_LEVEL_ORDINAL.get(payload.level.lower(), 2)
+    gender_label = "Male" if payload.gender.lower() == "male" else "Female"
+
     base = {
         "age": payload.age,
-        "gender": payload.gender,
+        "gender": gender_label,
         "weight_kg": payload.weight_kg,
         "height_m": payload.height_m,
         "bmi": bmi,
         "fat_percentage": payload.fat_percentage,
-        "experience_level": payload.level,
-        "goal": payload.goal,
+        "experience_level": experience_ordinal,
+        "goal": goal_label,
         "resting_bpm": payload.resting_bpm,
         "avg_bpm": payload.avg_bpm,
         "max_bpm": payload.max_bpm,
         "hrv_ms": payload.hrv_ms,
         "hour_of_day": payload.hour_of_day,
-        "workout_type": payload.workout_type,
+        "workout_type": workout_type_label,
         "session_duration_hours": payload.session_duration_hours,
         "workout_frequency_days_week": payload.workout_frequency_days_week,
         "water_intake_liters": payload.water_intake_liters,
@@ -141,7 +176,8 @@ def build_feature_frame(payload: PredictRequest) -> tuple[pd.DataFrame, float]:
     df = pd.DataFrame([base])
 
     if FEATURE_COLUMNS:
-        encoded = pd.get_dummies(df, drop_first=True)
+        categorical_cols = [c for c in ("gender", "goal", "workout_type") if c in df.columns]
+        encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
         encoded = encoded.reindex(columns=FEATURE_COLUMNS, fill_value=0)
         return encoded, bmi
 
@@ -352,7 +388,4 @@ def predict(payload: PredictRequest):
         return build_response(payload)
     except Exception as exc:
         traceback.print_exc()
-        return {
-            "error": str(exc),
-            "trace": traceback.format_exc(),
-        }
+        raise HTTPException(status_code=500, detail=str(exc))
