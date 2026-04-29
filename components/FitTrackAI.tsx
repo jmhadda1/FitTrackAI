@@ -19,11 +19,49 @@ import {
   Wind,
   RotateCcw,
   Zap,
+  ShieldCheck,
+  Database,
+  TrendingUp,
+  AlertTriangle,
+  Info,
+  CircleAlert,
+  Scale,
+  ScrollText,
 } from "lucide-react";
 
 type Goal = "muscle_gain" | "fat_loss" | "endurance";
 type Level = "beginner" | "intermediate" | "advanced";
 type Confidence = "Low" | "Medium" | "High";
+
+type GovernanceStatus = "pass" | "review" | "block";
+type RiskSeverity = "info" | "caution" | "warning" | "block";
+
+type RiskFlag = {
+  code: string;
+  severity: RiskSeverity;
+  title: string;
+  detail: string;
+  category: string;
+};
+
+type LlmExplanation = {
+  explanation: string;
+  headline: string;
+  risk_acknowledgement: string | null;
+  confidence_caveat: string;
+  provider: string;
+  elapsed_ms: number;
+};
+
+type DataProvenance = {
+  model?: string;
+  model_artifact?: string;
+  training_sample_size?: number;
+  training_split?: string;
+  test_metrics?: { MAE_kcal?: number; RMSE_kcal?: number; R2?: number };
+  feature_count?: number;
+  rules_engine_version?: string;
+};
 
 type FitTrackApiResult = {
   workout: string[];
@@ -45,6 +83,13 @@ type FitTrackApiResult = {
   summary: string;
   nutrition_tip: string;
   recovery_tip: string;
+  governance_status?: GovernanceStatus;
+  governance_summary?: string;
+  risk_flags?: RiskFlag[];
+  disclaimers?: string[];
+  bias_notes?: string[];
+  data_provenance?: DataProvenance;
+  llm_explanation?: LlmExplanation;
 };
 
 type AthletePreset = {
@@ -147,6 +192,13 @@ function normalizeResult(result: FitTrackApiResult | null, goal: Goal, level: Le
     nutrition: safeText(result.nutrition, result.nutrition_tip ?? ""),
     inputs: result.inputs ?? { goal, level, age },
     generatedAt: result.generatedAt ?? new Date().toISOString(),
+    governance_status: result.governance_status ?? "pass",
+    governance_summary: safeText(result.governance_summary, "Recommendation released."),
+    risk_flags: Array.isArray(result.risk_flags) ? result.risk_flags : [],
+    disclaimers: Array.isArray(result.disclaimers) ? result.disclaimers : [],
+    bias_notes: Array.isArray(result.bias_notes) ? result.bias_notes : [],
+    data_provenance: (result.data_provenance ?? {}) as DataProvenance,
+    llm_explanation: result.llm_explanation,
   };
 }
 
@@ -434,6 +486,22 @@ export default function FitTrackAI() {
                     <MiniMetric label="Workout Type" value={safeResult.workout_type} />
                     <MiniMetric label="Experience" value={safeResult.experience_label} />
                   </div>
+
+                  {safeResult.llm_explanation ? (
+                    <AICoachNotesCard llm={safeResult.llm_explanation} />
+                  ) : null}
+
+                  <GovernanceCard
+                    status={safeResult.governance_status}
+                    summary={safeResult.governance_summary}
+                    flags={safeResult.risk_flags}
+                    provenance={safeResult.data_provenance}
+                    biasNotes={safeResult.bias_notes}
+                  />
+
+                  {safeResult.disclaimers && safeResult.disclaimers.length > 0 ? (
+                    <DisclaimerStrip items={safeResult.disclaimers} />
+                  ) : null}
                 </motion.div>
               ) : (
                 <motion.div key="empty-state" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6 rounded-3xl border border-dashed border-white/10 bg-white/5 p-8 text-center text-slate-300">
@@ -446,9 +514,16 @@ export default function FitTrackAI() {
           </section>
 
           <aside className="space-y-6">
-            <GlassPanel title="Why FitTrack AI?" icon={Trophy}><p className="text-sm leading-6 text-slate-300">This demo is built like a real product: it accepts user input, generates a training recommendation, explains the logic, and returns recovery guidance. That makes it easy to present as an AI-integrated business solution rather than just a model.</p></GlassPanel>
-            <GlassPanel title="Demo Highlights" icon={HeartPulse}><ul className="mt-4 space-y-3 text-sm text-slate-300"><li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Tailored workout plan based on goal and level</li><li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Fatigue score visualized for quick decision making</li><li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Plain-language AI explanation for governance</li><li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Post-session nutrition recommendation</li></ul></GlassPanel>
-            <GlassPanel title="Product Framing" icon={Activity}><div className="mt-4 space-y-3 text-sm text-slate-300"><Row label="Business Problem" value="People need smarter workout guidance" /><Row label="ML Role" value="Predict plan + fatigue + recovery" /><Row label="Governance" value="Explain recommendations clearly" /><Row label="Value" value="More personalized, safer training" /></div></GlassPanel>
+            <BusinessValuePanel result={safeResult} />
+            <GovernancePosturePanel result={safeResult} />
+            <GlassPanel title="Demo Highlights" icon={HeartPulse}>
+              <ul className="mt-4 space-y-3 text-sm text-slate-300">
+                <li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Personalised workout, calories and fatigue from a single ML call.</li>
+                <li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />LLM coaching narrative grounded in the deterministic prediction.</li>
+                <li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Rule-based governance produces auditable risk flags before the LLM speaks.</li>
+                <li className="flex items-start gap-3"><BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-300" />Bias and data provenance shipped alongside every prediction.</li>
+              </ul>
+            </GlassPanel>
           </aside>
         </main>
       </div>
@@ -484,4 +559,243 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-3xl border border-white/10 bg-white/5 p-4 shadow-lg shadow-black/20"><div className="text-[10px] uppercase tracking-[0.3em] text-slate-500">{label}</div><div className="mt-2 text-lg font-semibold text-white">{value}</div></div>;
+}
+
+function severityStyle(severity: RiskSeverity) {
+  switch (severity) {
+    case "block":
+      return "border-rose-400/40 bg-rose-500/15 text-rose-100";
+    case "warning":
+      return "border-amber-400/30 bg-amber-500/10 text-amber-100";
+    case "caution":
+      return "border-yellow-400/20 bg-yellow-500/10 text-yellow-100";
+    default:
+      return "border-cyan-400/20 bg-cyan-500/10 text-cyan-100";
+  }
+}
+
+function severityIcon(severity: RiskSeverity) {
+  if (severity === "block" || severity === "warning") return AlertTriangle;
+  if (severity === "caution") return CircleAlert;
+  return Info;
+}
+
+function statusStyle(status: GovernanceStatus | undefined) {
+  if (status === "block") return "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/30";
+  if (status === "review") return "bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/30";
+  return "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30";
+}
+
+function statusLabel(status: GovernanceStatus | undefined) {
+  if (status === "block") return "Held for review";
+  if (status === "review") return "Released - review flags";
+  return "Cleared";
+}
+
+function AICoachNotesCard({ llm }: { llm: LlmExplanation }) {
+  const isLLM = !llm.provider.startsWith("deterministic");
+  return (
+    <div className="rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-slate-950/85 via-cyan-950/20 to-slate-950/85 p-5 shadow-2xl shadow-cyan-500/10 backdrop-blur-xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <Sparkles className="h-4 w-4 text-cyan-300" /> AI Coach Notes
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className={cn(
+            "inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-semibold",
+            isLLM ? "bg-cyan-500/15 text-cyan-200 ring-1 ring-cyan-400/30"
+                  : "bg-slate-500/15 text-slate-300 ring-1 ring-slate-400/20",
+          )}>
+            <Brain className="h-3.5 w-3.5" />
+            {isLLM ? llm.provider : "Template fallback"}
+          </span>
+          {llm.elapsed_ms ? (
+            <span className="rounded-full bg-white/5 px-2.5 py-1 text-slate-400 ring-1 ring-white/10">
+              {llm.elapsed_ms} ms
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <p className="mt-3 text-base font-semibold text-white">{llm.headline}</p>
+      <p className="mt-2 text-sm leading-6 text-slate-200">{llm.explanation}</p>
+      {llm.risk_acknowledgement ? (
+        <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{llm.risk_acknowledgement}</span>
+        </div>
+      ) : null}
+      <p className="mt-4 text-xs text-slate-500">{llm.confidence_caveat}</p>
+    </div>
+  );
+}
+
+function GovernanceCard({
+  status,
+  summary,
+  flags,
+  provenance,
+  biasNotes,
+}: {
+  status: GovernanceStatus | undefined;
+  summary: string | undefined;
+  flags: RiskFlag[] | undefined;
+  provenance: DataProvenance | undefined;
+  biasNotes: string[] | undefined;
+}) {
+  const flagList = flags ?? [];
+  const grouped: Record<string, RiskFlag[]> = {};
+  for (const f of flagList) {
+    grouped[f.category] = grouped[f.category] ? [...grouped[f.category], f] : [f];
+  }
+  const metrics = provenance?.test_metrics ?? {};
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <ShieldCheck className="h-4 w-4 text-emerald-300" /> Trust &amp; Governance
+        </div>
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold", statusStyle(status))}>
+          <ShieldCheck className="h-3.5 w-3.5" />
+          {statusLabel(status)}
+        </span>
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-slate-300">{summary}</p>
+
+      {flagList.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {flagList.map((flag) => {
+            const Icon = severityIcon(flag.severity);
+            return (
+              <div key={flag.code} className={cn("flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm", severityStyle(flag.severity))}>
+                <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-300/70">
+                    <span>{flag.severity}</span>
+                    <span>•</span>
+                    <span>{flag.category}</span>
+                  </div>
+                  <p className="mt-1 font-semibold text-white">{flag.title}</p>
+                  <p className="text-slate-200/90">{flag.detail}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
+          <BadgeCheck className="h-3.5 w-3.5" /> No active risk flags for this profile.
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.25em] text-slate-400">
+            <Database className="h-3.5 w-3.5 text-cyan-300" /> Data provenance
+          </div>
+          <div className="mt-3 space-y-1.5 text-xs text-slate-300">
+            <div><span className="text-slate-500">Model:</span> {provenance?.model ?? "RandomForestRegressor"}</div>
+            <div><span className="text-slate-500">Training rows:</span> {provenance?.training_sample_size ?? 2000} ({provenance?.training_split ?? "80 / 20"})</div>
+            <div><span className="text-slate-500">Features:</span> {provenance?.feature_count ?? 31}</div>
+            <div><span className="text-slate-500">Held-out test:</span> MAE {metrics.MAE_kcal ?? 44.3} kcal · R² {metrics.R2 ?? 0.936}</div>
+            <div><span className="text-slate-500">Rules engine:</span> {provenance?.rules_engine_version ?? "fittrack.governance"}</div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.25em] text-slate-400">
+            <Scale className="h-3.5 w-3.5 text-orange-300" /> Bias awareness
+          </div>
+          <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
+            {(biasNotes ?? []).slice(0, 4).map((note, idx) => (
+              <li key={idx} className="flex gap-2">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-orange-300/60" />
+                <span>{note}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DisclaimerStrip({ items }: { items: string[] }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-4 text-xs leading-5 text-slate-400 backdrop-blur">
+      <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.25em] text-slate-500">
+        <ScrollText className="h-3.5 w-3.5" /> Disclaimers
+      </div>
+      <ul className="space-y-1">
+        {items.map((item, idx) => (
+          <li key={idx} className="flex gap-2">
+            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-slate-500/60" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BusinessValuePanel({ result }: { result: ReturnType<typeof normalizeResult> }) {
+  return (
+    <GlassPanel title="Business Value" icon={TrendingUp}>
+      <p className="mt-3 text-sm leading-6 text-slate-300">
+        FitTrack AI replaces $40-80/hour personal coaching with sub-second, fatigue-aware
+        guidance that fits inside any gym, wellness app, or corporate benefits programme.
+      </p>
+      <div className="mt-4 grid gap-3">
+        <ValueRow label="Cost per prediction" value="≈ $0" accent="emerald" />
+        <ValueRow label="Latency" value="< 1 s end-to-end" accent="cyan" />
+        <ValueRow label="Model accuracy" value="R² 0.94 / MAE 44 kcal" accent="orange" />
+        <ValueRow label="Scale" value="1 model · ∞ users" accent="violet" />
+      </div>
+      {result ? (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-xs leading-5 text-slate-400">
+          Today&apos;s session is forecast at <span className="text-white">{Math.round(result.calories_burned)} kcal</span>{" "}
+          with a fatigue score of <span className="text-white">{Math.round(result.fatigue_score)}</span>{" "}
+          and a protein target of <span className="text-white">{result.protein_target_g} g</span>.
+        </div>
+      ) : null}
+    </GlassPanel>
+  );
+}
+
+function GovernancePosturePanel({ result }: { result: ReturnType<typeof normalizeResult> }) {
+  const status = result?.governance_status ?? "pass";
+  const flags = result?.risk_flags ?? [];
+  return (
+    <GlassPanel title="Governance Posture" icon={ShieldCheck}>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold", statusStyle(status))}>
+          <ShieldCheck className="h-3.5 w-3.5" />
+          {statusLabel(status)}
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-slate-300">
+          {flags.length} active flag{flags.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <ul className="mt-4 space-y-2 text-xs leading-5 text-slate-300">
+        <li className="flex items-start gap-2"><BadgeCheck className="mt-0.5 h-3.5 w-3.5 text-emerald-300" />Rule-based safety + distribution checks run before any LLM call.</li>
+        <li className="flex items-start gap-2"><BadgeCheck className="mt-0.5 h-3.5 w-3.5 text-emerald-300" />LLM narrative is grounded in the deterministic prediction; cannot invent numbers.</li>
+        <li className="flex items-start gap-2"><BadgeCheck className="mt-0.5 h-3.5 w-3.5 text-emerald-300" />Bias and data provenance ship with every response.</li>
+        <li className="flex items-start gap-2"><BadgeCheck className="mt-0.5 h-3.5 w-3.5 text-emerald-300" />Disclaimers attach to every recommendation; no medical claims.</li>
+      </ul>
+    </GlassPanel>
+  );
+}
+
+function ValueRow({ label, value, accent }: { label: string; value: string; accent: "cyan" | "emerald" | "orange" | "violet" }) {
+  const accentClass =
+    accent === "emerald" ? "text-emerald-300 bg-emerald-500/10 ring-emerald-400/20" :
+    accent === "orange" ? "text-orange-300 bg-orange-500/10 ring-orange-400/20" :
+    accent === "violet" ? "text-violet-300 bg-violet-500/10 ring-violet-400/20" :
+    "text-cyan-300 bg-cyan-500/10 ring-cyan-400/20";
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <div className="text-xs uppercase tracking-[0.25em] text-slate-500">{label}</div>
+      <div className={cn("rounded-full px-3 py-1 text-xs font-semibold ring-1", accentClass)}>{value}</div>
+    </div>
+  );
 }

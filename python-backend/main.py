@@ -7,6 +7,9 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from governance import evaluate as evaluate_governance
+from llm import generate_explanation
+
 app = FastAPI(title="FitTrack Model API", version="4.1.0")
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -340,7 +343,7 @@ def build_response(payload: PredictRequest) -> dict:
     workout = get_workout_plan(payload.goal, payload.level)
     confidence = "High" if fatigue < 45 else "Medium" if fatigue < 70 else "Low"
 
-    return {
+    base_response = {
         "workout": workout,
         "calories_burned": round(calories_burned, 1),
         "bmi": round(bmi, 1),
@@ -365,6 +368,24 @@ def build_response(payload: PredictRequest) -> dict:
             "age": payload.age,
         },
     }
+
+    governance_report = evaluate_governance(payload, base_response).to_dict()
+    llm_payload = generate_explanation(payload, base_response, governance_report)
+
+    base_response["governance"] = governance_report
+    base_response["risk_flags"] = governance_report["risk_flags"]
+    base_response["disclaimers"] = governance_report["disclaimers"]
+    base_response["bias_notes"] = governance_report["bias_notes"]
+    base_response["data_provenance"] = governance_report["data_provenance"]
+    base_response["governance_status"] = governance_report["status"]
+    base_response["governance_summary"] = governance_report["summary"]
+    base_response["llm_explanation"] = llm_payload
+
+    if governance_report["status"] == "block":
+        base_response["confidence"] = "Low"
+        base_response["title"] = "Plan held for review"
+
+    return base_response
 
 
 @app.get("/")
